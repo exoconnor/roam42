@@ -22,9 +22,6 @@
     //determine if user has created a custom trigger
     let customTrigger = await roam42.settings.get("SmartBlockTrigger");
 
-    //by default we don't use date references from the daily note pages.
-    roam42.smartBlocks.activeWorkflow.vars['DATEBASISDAILYNOTES'] = false;
-
     if(customTrigger!=null && customTrigger.length>0) {
       var newTrigger = customTrigger.replaceAll('\"','').trim();
       if(newTrigger.length>0)
@@ -76,42 +73,50 @@
     
     const applyViewType = async (node)=>{
       //applies the document type for the bullet level
-      var blockId = document.querySelector('textarea.rm-block-input').id;
-      var parentControlNode = document.querySelector('textarea.rm-block-input').parentNode;  
-      roam42.common.simulateMouseClickRight(
-        document.querySelector('textarea.rm-block-input').closest('.flex-h-box').querySelector('.simple-bullet-outer'))
-      await roam42.common.sleep(100);
-      var menuItem1 = document.querySelector('.bp3-popover-content > div> ul').childNodes[9].innerText;
-      var menuItem2 = document.querySelector('.bp3-popover-content > div> ul').childNodes[10].innerText;
-      var menuItemToClick = false;
-      switch (node['view-type']) {
-        case 'bullet':
-          if(menuItem1=='View as Bulleted List') 
-            menuItemToClick=1;
-          if(menuItem2=='View as Bulleted List') 
-            menuItemToClick=2;
-          break;
-        case 'document':
-          if(menuItem1=='View as Document') 
-            menuItemToClick=1;
-          if(menuItem2=='View as Document') 
-            menuItemToClick=2;
-          break;
-        case 'numbered':
-          if(menuItem1=='View as Numbered List') 
-            menuItemToClick=1;
-          if(menuItem2=='View as Numbered List') 
-            menuItemToClick=2;
-          break;
+      try {
+        var blockId = document.querySelector('textarea.rm-block-input').id;
+        var parentControlNode = document.querySelector('textarea.rm-block-input').parentNode;  
+        roam42.common.simulateMouseClickRight(
+          document.querySelector('textarea.rm-block-input').closest('.flex-h-box').querySelector('.rm-bullet'))
+        await roam42.common.sleep(500);
+        var menuItem1 = document.querySelector('.bp3-popover-content > div> ul').childNodes[9].innerText;
+        var menuItem2 = document.querySelector('.bp3-popover-content > div> ul').childNodes[10].innerText;
+        var menuItemToClick = false;
+        switch (node['view-type']) {
+          case 'bullet':
+            if(menuItem1=='View as Bulleted List') 
+              menuItemToClick=1;
+            if(menuItem2=='View as Bulleted List') 
+              menuItemToClick=2;
+            break;
+          case 'document':
+            if(menuItem1=='View as Document') 
+              menuItemToClick=1;
+            if(menuItem2=='View as Document') 
+              menuItemToClick=2;
+            break;
+          case 'numbered':
+            if(menuItem1=='View as Numbered List') 
+              menuItemToClick=1;
+            if(menuItem2=='View as Numbered List') 
+              menuItemToClick=2;
+            break;
+        }
+        if(menuItemToClick == false) 
+          await roam42KeyboardLib.pressEsc(100);
+        else
+          document.querySelector('.bp3-popover-content > div> ul').childNodes[8 + menuItemToClick  ].childNodes[0].click();
+        await roam42.common.sleep(100);
+        roam42.common.simulateMouseClick(document.getElementById(blockId));
+        await roam42.common.sleep(100);
+        document.activeElement.setSelectionRange(document.activeElement.textLength,document.activeElement.textLength);        
+      } catch(e) { 
+        console.log('View type change failed with error',e)
       }
-      if(menuItemToClick == false) 
-        await roam42KeyboardLib.pressEsc(100);
-      else
-        document.querySelector('.bp3-popover-content > div> ul').childNodes[8 + menuItemToClick  ].childNodes[0].click();
-      await roam42.common.sleep(100);
       roam42.common.simulateMouseClick(document.getElementById(blockId));
       await roam42.common.sleep(100);
-      document.activeElement.setSelectionRange(document.activeElement.textLength,document.activeElement.textLength);          
+      document.activeElement.setSelectionRange(document.activeElement.textLength,document.activeElement.textLength);        
+      
     }
     
     roam42.smartBlocks.outputArrayWrite = async ()=> {
@@ -148,8 +153,17 @@
 
     const blocksToInsert = item => {
       setTimeout(async () => {        
+        roam42.smartBlocks.sbBomb(item);
+      }, 300); // end setTimeout
+      return ' ';        
+    };
+    
+    roam42.smartBlocks.sbBomb = async (item, skipCursorRelocation=false)=>{
         //make sure we are in the textarea that started this insert (tribute menu may have closed focus on text area)
         var removeTributeTriggerSpacer=2;
+        //by default we don't use date references from the daily note pages.
+        roam42.smartBlocks.activeWorkflow.vars['DATEBASISDAILYNOTES'] = false;
+        
         if(document.activeElement.type !='textarea') {
           roam42.common.simulateMouseClick(document.getElementById(roam42.smartBlocks.activeTributeTextAreaId));          
           await roam42.common.sleep(100);    
@@ -178,8 +192,10 @@
               var results = await roam42.common.getBlockInfoByUID( item.original.value, true );
               roam42.smartBlocks.activeWorkflow.name = item.original.key;
               roam42.smartBlocks.activeWorkflow.UID  = item.original.value;
-              roam42.smartBlocks.activeWorkflow.startingBlockTextArea = document.activeElement.id;
-              roam42.smartBlocks.activeWorkflow.startingBlockContents = document.activeElement.value;
+              if(skipCursorRelocation==false) { 
+                roam42.smartBlocks.activeWorkflow.startingBlockTextArea = document.activeElement.id;
+                roam42.smartBlocks.activeWorkflow.startingBlockContents = document.activeElement.value;
+              }
               roam42.smartBlocks.activeWorkflow.currentSmartBlockBlockBeingProcessed = '';
               roam42.smartBlocks.activeWorkflow.currentSmartBlockTextArea = '';
               roam42.smartBlocks.activeWorkflow.arrayToWrite = [];
@@ -314,12 +330,13 @@
                   await loopStructure(results[0][0].children, 1); //only process if has children
                 }
                 //delete last blok inserted
-                await roam42.common.sleep(100);                
-                roam42.common.blockDelete(document.activeElement);
-                await roam42.common.sleep(100);                
-                
+                if(skipCursorRelocation==false){
+                  await roam42.common.sleep(100);                
+                  roam42.common.blockDelete(document.activeElement);
+                  await roam42.common.sleep(100);                
+                }
                 //Do a FOCUS on BLOCK
-                if(roam42.smartBlocks.activeWorkflow.focusOnBlock!='') {
+                if(roam42.smartBlocks.activeWorkflow.focusOnBlock!='' && skipCursorRelocation==false) {
                   roam42.common.simulateMouseClick(document.getElementById(roam42.smartBlocks.activeWorkflow.focusOnBlock));   
                   await roam42.common.sleep(100);
                   let parentControlNode =  document.activeElement.parentNode;                    
@@ -328,8 +345,9 @@
                   await roam42.common.sleep(100);
                 }
                 //SET cursor location
-               roam42.common.simulateMouseClick(document.getElementById(roam42.smartBlocks.activeWorkflow.startingBlockTextArea));
-                setTimeout(()=>{
+               if(skipCursorRelocation==false) {
+                roam42.common.simulateMouseClick(document.getElementById(roam42.smartBlocks.activeWorkflow.startingBlockTextArea));
+                  setTimeout(()=>{
                   if(document.activeElement.value.includes('<%CURSOR%>'))    {
                     var newValue = document.querySelector('textarea.rm-block-input').value;
                     document.activeElement.value = '';
@@ -337,10 +355,14 @@
                   }
                   else
                     document.activeElement.setSelectionRange(document.activeElement.value.length,document.activeElement.value.length);                              
-                },200);                
+                  },200);                
+               }
               }
               
             } // end IF
+          
+          //by default we don't use date references from the daily note pages.
+          roam42.smartBlocks.activeWorkflow.vars['DATEBASISDAILYNOTES'] = false;          
           //start observing mutations again
           roam42.smartBlocks.textBoxObserver.observe(document, { childList: true, subtree: true });   
         } catch(e) {
@@ -348,9 +370,45 @@
           //start observing mutations again
           roam42.smartBlocks.textBoxObserver.observe(document, { childList: true, subtree: true });  
         } 
-      }, 300); // end setTimeout
-      return " ";
+      return " ";    
     };
+    
+    roam42.smartBlocks.buttonClick = (e) =>{
+      roam42.smartBlocks.buttonClickHandler(e);  
+      return ' ';
+    }    
+    roam42.smartBlocks.buttonClickHandler = async (e)=>{
+      if(e.target.tagName=='BUTTON' && e.target.textContent.includes('->')) {
+        var block = e.target.closest('.roam-block');
+        var command = e.target.textContent;
+        var blockText = block.innerText;
+        var userCommands = await roam42.smartBlocks.UserDefinedWorkflowsList();
+        var commandName = command.replace('->','').trim();
+        var sbCommand = userCommands.find(e => e.key == commandName);
+        await roam42.common.simulateMouseClick(block);
+        await roam42.common.sleep(200);
+        var blockInfo = (await roam42.common.getBlockInfoByUID(block.id.substring( block.id.length -9)))[0][0].string;
+        if(sbCommand==undefined){
+          //no valid SB, highlight text
+          document.activeElement.setSelectionRange(blockInfo.search(command),blockInfo.search(command)+command.length+4)
+          roam42.help.displayMessage(commandName + ' is not a valid Roam42 SmartBlock',3000);
+        } else {
+          //valid SB, remove it andrun it          
+          console.log(command)
+          var setValue = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;   
+          var cursorLocation = blockInfo.search('{{' + command + '}}') +2;
+          setValue.call(document.activeElement, blockInfo.replace('{{' + command + '}}','  ') );
+          var e = new Event('input', { bubbles: true });
+          document.activeElement.dispatchEvent(e);          
+          await roam42.common.sleep(200);
+          document.activeElement.setSelectionRange(cursorLocation,cursorLocation);
+          await roam42.common.sleep(300);        
+         await blocksToInsert({original: sbCommand});
+        }
+      }      
+    }
+    
+    document.addEventListener("click",roam42.smartBlocks.buttonClick,false);
     
     roam42.smartBlocks.activeTributeTextAreaId = '';
     roam42.smartBlocks.tributeMenuTrigger = '';
@@ -414,12 +472,13 @@
 
   window.roam42.smartBlocks.testingReload = () => {
     try {
+      document.removeEventListener("click",roam42.smartBlocks.buttonClick,false);    
       roam42.smartBlocks.textBoxObserver.disconnect();
       roam42.smartBlocks.textBoxObserver = {};
       roam42.smartBlocks.initialize = {};
     } catch (e) {}
     roam42.loader.addScriptToPage( "smartBlocks", roam42.host + 'ext/smartBlocks.js');
     setTimeout(()=>roam42.loader.addScriptToPage( 'smartBlocksCmd',roam42.host + 'ext/smartBlocksCmd.js'), 3000)    
-    setTimeout(()=>roam42.smartBlocks.initialize(), 6000)
+    setTimeout(()=>roam42.smartBlocks.initialize(), 5000)
   };
 })();

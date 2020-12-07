@@ -139,7 +139,7 @@
   
   
   roam42.timemgmt.todosOverdue = async (limitOutputCount = 50, sortAscending=true, includeDNPTasks=true)=>{
-    var yesterday = chrono.parseDate('yesterday');
+    var yesterday = roam42.dateProcessing.testIfRoamDateAndConvert(roam42.dateProcessing.parseTextForDates('yesterday'));
     var outputTODOs = [];
     var outputCounter = 1;
     
@@ -182,7 +182,7 @@
   }
   
   roam42.timemgmt.todosFuture = async (limitOutputCount = 50, sortAscending=true, includeDNPTasks=true)=>{
-    var tomorrow = chrono.parseDate('tomorrow');
+    var tomorrow = roam42.dateProcessing.testIfRoamDateAndConvert(roam42.dateProcessing.parseTextForDates('tomorrow'));
     var outputTODOs = [];
     var outputCounter = 1;
     //STEPS: (1) loop through each tag to see if it is a date before today (2) Also check if page name is dated
@@ -327,11 +327,20 @@
   
   roam42.q.smartBlocks.commands.blockMentions = async (requestString, textToProcess)=> {
     var limitOutputCount = Number(requestString.substring(0,requestString.search(',')));
+    var bReturnCount = false;
+    if(limitOutputCount==-1) {
+      limitOutputCount = 2000;
+      bReturnCount = true;
+    }    
     var queryParameters = requestString.substring(requestString.search(',')+1,requestString.length);
     var UIDS = [];
     for(var block of await roam42.q.blockMentions(queryParameters,limitOutputCount+1)) 
       UIDS.push(block.uid);
+    
     var results =  await roam42.common.getPageNamesFromBlockUidList(UIDS);
+
+    if(bReturnCount==true) return results.length;
+    
     results = results.sort((a, b) => a[0].string.localeCompare(b[0].string));
     for(var block of results) { 
       var newText = await roam42.common.replaceAsync(textToProcess, /(\<\%BLOCKMENTIONS:)(\s*[\S\s]*?)(\%\>)/g, async (match, name)=>{
@@ -352,65 +361,78 @@
   //returns date range. Params: 
   //  1 - Limit block count
   //  2 - Page name
-  //  3 - Start Date
-  //  4 - End Date
+  //  3 - Start Date   (if 0, no start date) (if -1 start/end date - only return if there is no date included)
+  //  4 - End Date     (if 0, no end date)
   //  5 - Sort order
   //  6 - Filter parameters
   roam42.q.smartBlocks.commands.blockMentionsDated = async (requestString, textToProcess)=> {
-    console.clear()
-    console.log(requestString, textToProcess)
-    
+
     var params = requestString.split(',')
-    console.log(params)
-    if(params.length<5) return 'BLOCKMENTIONSDATED requires atleast 5 parameters'
+    var bReturnCount = false;
+    var bReturnUndatedTodos = false;
+    
+    if(params.length<4) return 'BLOCKMENTIONSDATED requires atleast 4 parameters';
 
     var limitOutputCount = params.shift()
-    console.log('limitOutputCount',limitOutputCount)
-
-    var pageRefName = params.shift()
-    console.log('pageRefName',pageRefName)
-
-    var startDate = params.shift()
-    startDate = startDate!=0 ? await Date.parse(chrono.parseDate(startDate)) : Date.parse('1-01-01');
-    console.log('startDate',startDate)
+    if(limitOutputCount==-1) {
+      limitOutputCount = 2000;
+      bReturnCount = true;
+    }
     
-    var endDate = params.shift()    
-    endDate   = endDate!=0   ? await Date.parse(chrono.parseDate(endDate))   : Date.parse('9999-012-30');
-    console.log('endDate',endDate)
+    var pageRefName = params.shift();
 
-    var sortOrder = params.shift()
-    console.log('sortOrder',sortOrder)
+    var startDate = roam42.dateProcessing.parseTextForDates(params.shift()).replace('[[','').replace(']]','');
+    var endDate   = roam42.dateProcessing.parseTextForDates(params.shift()).replace('[[','').replace(']]',''); 
+  
+    if(startDate == '-1' && endDate =='-1') 
+      bReturnUndatedTodos = true;
+    else {
+      startDate = startDate!=0 ? await Date.parse(chrono.parseDate(startDate)) : Date.parse('1-01-01');
+      endDate   = endDate!=0   ? await Date.parse(chrono.parseDate(endDate))   : Date.parse('9999-012-30');
+    }
+ 
+    var sortOrder = params.length>0 ? params.shift() : 'ASC';
     
-    
-    var queryParameters = pageRefName + ',' + params.join(',')
-    console.log('queryParameters',queryParameters)    
-
+    var queryParameters = pageRefName + ',' + params.join(',');
     
     var UIDS = [];
-    for(var block of await roam42.q.blockMentions(queryParameters,1000)) 
+    for(var block of await roam42.q.blockMentions(queryParameters,2000)) 
       UIDS.push(block.uid);
     
     var queryDates = [];
     var outputCounter = 0;
     for(var block of await roam42.common.getPageNamesFromBlockUidList(UIDS)) {
       var blockText = block[0].string;
+      var outputThisBlock = false;
       if(outputCounter < limitOutputCount && blockText.substring(0,12)!='{{[[query]]:') { 
+        //testing for 2 conditions:
+        // 1 if it has a date in range return
+        // if user wants undated, return those with no date
         var pageRefs = blockText.replace(`[[${pageRefName}]]`,'').match(/\[\[(\s*[\S\s]*?)\]\]/g)
         if(pageRefs!=null) {
           for(let ref of pageRefs) {
             try {
               var testForDate =  roam42.dateProcessing.testIfRoamDateAndConvert(ref);
-              if(testForDate &&  startDate<=testForDate & endDate>=testForDate ) {
-                outputCounter+=1;
-                block[0].date = testForDate;
-                queryDates.push(block)
-              }                 
+              if(bReturnUndatedTodos==false) { //skip this block, it has a date
+                if(testForDate && startDate<=testForDate && endDate>=testForDate ) 
+                  outputThisBlock=true; //has a date, and dates should be outut
+              }
+              else 
+                if(!testForDate) outputThisBlock = true; //if not a date, write out (user requested not dated)                  
             } catch(e) {}
           }
-        } //end of testForPages!=null
+        } 
+        else //no page refs at all
+          if(bReturnUndatedTodos) outputThisBlock = true;
+      }
+      if(outputThisBlock){
+        outputCounter+=1;
+        block[0].date = testForDate;
+        queryDates.push(block)
       }
      } //end of for
     
+    if(bReturnCount==true) return queryDates.length; //return count and exit 
     
     var sortedQueryDates = [];
     switch(sortOrder.toUpperCase()) {
@@ -439,9 +461,6 @@
     else
       return '';
   }
-  
-  
-  
   
   //SEARCH
   
@@ -486,7 +505,7 @@
   }
   
   roam42.q.smartBlocks.commands.search = async (requestString, textToProcess)=> {  
-    var limitOutputCount = Number(requestString.substring(0,requestString.search(',')));
+    var limitOutputCount = Number(requestString.substring(0,requestString.search(',')))+1;
     var queryParameters = requestString.substring(requestString.search(',')+1,requestString.length);
     var outputCounter = 0;
     var UIDS = [];
@@ -506,8 +525,6 @@
       newText = await roam42.smartBlocks.proccessBlockWithSmartness(newText);
       await roam42.smartBlocks.activeWorkflow.outputAdditionalBlock(newText,false);      
     }
-    console.log(roam42.smartBlocks.activeWorkflow.arrayToWrite)
-   console.log(results,results.length)
     if(results.length>0)
       return roam42.smartBlocks.replaceFirstBlock;
     else
